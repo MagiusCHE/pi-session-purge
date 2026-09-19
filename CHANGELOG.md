@@ -4,7 +4,12 @@ Release notes are maintained in English. When a release is prepared, the `Unrele
 
 ## [Unreleased]
 
-- Tolerated unreadable session lines instead of refusing to purge: they are removed with the earlier history or kept verbatim after the compaction, and are now always reported in the confirmation dialog and in the final report.
+## [1.0.0] - 2026-09-19
+
+- First stable release: `/purge` rewrites the session file on disk, deleting everything appended before the last compaction while keeping the original header, the compaction checkpoint, the tail it retains and everything appended after it.
+- Tolerated unreadable session lines instead of refusing to purge: they are removed with the earlier history or kept verbatim after the compaction, and are always reported in the confirmation dialog and in the final report.
+- Transactional rewrite: backup next to the session file, anti-concurrency check, atomic replacement, post-write verification and automatic restore on failure.
+- Confirmation dialog with the entry count and expected saving, final report with the bytes and percentage saved, and a reminder to restart pi.
 
 ## [0.1.0] - 2026-09-19
 

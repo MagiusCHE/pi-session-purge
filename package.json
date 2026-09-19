@@ -1,6 +1,6 @@
 {
   "name": "@magiusche/pi-session-purge",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Purge command for the pi coding agent: rewrite a session file, deleting everything appended before the last compaction",
   "type": "module",
   "license": "MIT",

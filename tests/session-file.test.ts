@@ -46,6 +46,7 @@ const validExpectation = {
   headerRaw: HEADER,
   keptIds: ["e1", "e2"],
   requiredIds: ["e1"],
+  lineCount: 3,
 };
 
 test("readSessionFile snapshots text, size, mode and mtime", () => {
@@ -100,20 +101,37 @@ test("verifyPurgedFile accepts a consistent file", () => {
   });
 });
 
-test("verifyPurgedFile rejects a modified header, invalid lines and dangling parents", () => {
-  withSessionFile(`${HEADER}\n${entry("e1", null)}\n`, (path) => {
+test("verifyPurgedFile tolerates unreadable lines kept verbatim", () => {
+  const corrupt = `${JSON.stringify({ type: "message", id: "x1" })}\u0000\u0000`;
+  withSessionFile(
+    `${HEADER}\n${entry("e1", null)}\n${corrupt}\n${entry("e2", "e1")}\n`,
+    (path) => {
+      assert.doesNotThrow(() =>
+        verifyPurgedFile(path, { ...validExpectation, lineCount: 4 }),
+      );
+    },
+  );
+});
+
+test("verifyPurgedFile rejects a wrong line count", () => {
+  withSessionFile(validContent, (path) => {
+    assert.throws(
+      () => verifyPurgedFile(path, { ...validExpectation, lineCount: 2 }),
+      /3 lines instead of the expected 2/,
+    );
+    assert.throws(
+      () => verifyPurgedFile(path, { ...validExpectation, lineCount: 9 }),
+      /3 lines instead of the expected 9/,
+    );
+  });
+});
+
+test("verifyPurgedFile rejects a modified header and dangling parents", () => {
+  withSessionFile(validContent, (path) => {
     assert.throws(
       () => verifyPurgedFile(path, { ...validExpectation, headerRaw: `${HEADER} ` }),
       /does not keep the original session header/,
     );
-  });
-
-  withSessionFile(`${HEADER}\nnot json\n`, (path) => {
-    assert.throws(() => verifyPurgedFile(path, validExpectation), /invalid JSON line/);
-  });
-
-  withSessionFile(`${HEADER}\n{"type":"message"}\n`, (path) => {
-    assert.throws(() => verifyPurgedFile(path, validExpectation), /entry without an id/);
   });
 
   withSessionFile(
@@ -131,7 +149,7 @@ test("verifyPurgedFile rejects a modified header, invalid lines and dangling par
 test("verifyPurgedFile rejects a file that lost a promised entry", () => {
   withSessionFile(`${HEADER}\n${entry("e1", null)}\n`, (path) => {
     assert.throws(
-      () => verifyPurgedFile(path, validExpectation),
+      () => verifyPurgedFile(path, { ...validExpectation, lineCount: 2 }),
       /lost 1 expected entries/,
     );
     assert.throws(
@@ -140,6 +158,7 @@ test("verifyPurgedFile rejects a file that lost a promised entry", () => {
           ...validExpectation,
           keptIds: ["e1"],
           requiredIds: ["e2"],
+          lineCount: 2,
         }),
       /lost 1 expected entries/,
     );

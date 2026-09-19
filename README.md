@@ -51,6 +51,14 @@ the compaction stays reachable from the leaf, and no entry points at a removed
 parent (an entry whose parent was dropped simply becomes a root, which pi already
 supports).
 
+### Unreadable lines
+
+Session files can contain corrupt lines (interrupted writes, NUL bytes,
+truncated JSON) that pi itself skips when loading a session. `/purge` does not
+refuse because of them: unreadable lines before the compaction are removed with
+the history, the ones after it are kept byte for byte, and their count is
+reported both in the confirmation dialog and in the final report.
+
 ## Safety
 
 `/purge` runs only while the agent is idle and refuses to run when the agent is

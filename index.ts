@@ -57,8 +57,6 @@ interface PiApi {
 
 const REFUSAL_MESSAGES: Record<PurgeRefusal, string> = {
   "not-a-session": "/purge works only on a pi session file.",
-  "unsupported-format":
-    "The session file contains lines that are not valid session entries, so /purge was aborted to avoid data loss.",
   "no-active-path": "This session has no active position to purge.",
   "no-compaction":
     "/purge can be used only on sessions that have been compacted at least once. This session has never been compacted, so nothing was changed.",
@@ -76,9 +74,20 @@ const WARNING_MESSAGES: Record<string, string> = {
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** Report unreadable lines, when the session file has any. */
+const unreadableLines = (plan: PurgePlan): string | null => {
+  const total = plan.junkRemoved + plan.junkKept;
+  if (total === 0) return null;
+  const parts: string[] = [];
+  if (plan.junkRemoved > 0) parts.push(`${plan.junkRemoved} removed`);
+  if (plan.junkKept > 0) parts.push(`${plan.junkKept} kept verbatim`);
+  return `Unreadable lines: ${total} (${parts.join(", ")}) — pi skips them when loading a session.`;
+};
+
 /** Text of the confirmation dialog, including every consequence of the purge. */
 export function confirmationMessage(sessionFile: string, plan: PurgePlan): string {
   const percent = savingsPercent(plan.totalBytes, plan.keptBytes);
+  const unreadable = unreadableLines(plan);
   return [
     "This rewrites the session file on disk. The original physical history of the",
     "session is restructured and everything appended before the last compaction is",
@@ -88,6 +97,7 @@ export function confirmationMessage(sessionFile: string, plan: PurgePlan): strin
     `  File:     ${basename(sessionFile)}`,
     `  Entries:  ${plan.removedRecords} of ${plan.removedRecords + plan.keptRecords} removed`,
     `  Size:     ${formatBytes(plan.totalBytes)} -> about ${formatBytes(plan.keptBytes)} (${percent.toFixed(1)}% smaller)`,
+    ...(unreadable === null ? [] : [`  ${unreadable}`]),
     "",
     "The original session header, the compaction and the messages it retains are",
     "kept, together with everything appended after it.",
@@ -119,9 +129,7 @@ async function purgeSessionFile(
   if (!result.ok) {
     ctx.ui.notify(
       REFUSAL_MESSAGES[result.reason],
-      result.reason === "unsupported-format" || result.reason === "not-a-session"
-        ? "error"
-        : "info",
+      result.reason === "not-a-session" ? "error" : "info",
     );
     return;
   }
@@ -154,6 +162,7 @@ async function purgeSessionFile(
       headerRaw: plan.headerRaw,
       keptIds: plan.keptIds,
       requiredIds: plan.requiredIds,
+      lineCount: plan.lines.length,
     });
   } catch (error) {
     let restored = true;
@@ -174,10 +183,12 @@ async function purgeSessionFile(
   const purgedBytes = statSync(sessionFile).size;
   const percent = savingsPercent(snapshot.size, purgedBytes);
   const saved = Math.max(0, snapshot.size - purgedBytes);
-  ctx.ui.notify(
+  const report = [
     `Purged ${basename(sessionFile)}: ${plan.removedRecords} of ${plan.removedRecords + plan.keptRecords} entries removed, ${formatBytes(snapshot.size)} -> ${formatBytes(purgedBytes)} (${percent.toFixed(1)}% smaller, ${formatBytes(saved)} saved).`,
-    "info",
-  );
+  ];
+  const unreadable = unreadableLines(plan);
+  if (unreadable !== null) report.push(unreadable);
+  ctx.ui.notify(report.join("\n"), "info");
   for (const warning of plan.warnings) {
     ctx.ui.notify(WARNING_MESSAGES[warning] ?? `purge warning: ${warning}`, "warning");
   }

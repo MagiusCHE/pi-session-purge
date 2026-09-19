@@ -33,6 +33,8 @@ export interface PurgeVerification {
   keptIds: readonly string[];
   /** Ids that must stay resolvable for pi to rebuild the context. */
   requiredIds: readonly string[];
+  /** Expected number of lines, header included: catches truncation or extras. */
+  lineCount: number;
 }
 
 const TMP_SUFFIX = ".purge-tmp";
@@ -102,8 +104,9 @@ export function writeSessionFileAtomically(
 }
 
 /**
- * Re-read the purged file and fail when it is not a valid session: header
- * changed, invalid line, lost or duplicated entry, dangling parent.
+ * Re-read the purged file and fail when it is not a valid session: wrong line
+ * count, changed header, lost or duplicated entry, dangling parent. Lines that
+ * are not entries (corrupt lines pi skips) are tolerated and left untouched.
  */
 export function verifyPurgedFile(path: string, expected: PurgeVerification): void {
   const lines = readFileSync(path, "utf8")
@@ -112,6 +115,11 @@ export function verifyPurgedFile(path: string, expected: PurgeVerification): voi
   if (lines[0] !== expected.headerRaw) {
     throw new Error("the purged file does not keep the original session header");
   }
+  if (lines.length !== expected.lineCount) {
+    throw new Error(
+      `the purged file has ${lines.length} lines instead of the expected ${expected.lineCount}`,
+    );
+  }
 
   const entries: { id: string; parentId: string | null }[] = [];
   for (const line of lines.slice(1)) {
@@ -119,12 +127,11 @@ export function verifyPurgedFile(path: string, expected: PurgeVerification): voi
     try {
       parsed = JSON.parse(line);
     } catch {
-      throw new Error("the purged file contains an invalid JSON line");
+      // Unreadable line kept verbatim: pi skips it on load as well.
+      continue;
     }
     const record = parsed as { id?: unknown; parentId?: unknown };
-    if (typeof record.id !== "string") {
-      throw new Error("the purged file contains an entry without an id");
-    }
+    if (typeof record?.id !== "string") continue;
     entries.push({
       id: record.id,
       parentId: typeof record.parentId === "string" ? record.parentId : null,

@@ -4,6 +4,8 @@ Release notes are maintained in English. When a release is prepared, the `Unrele
 
 ## [Unreleased]
 
+- Tolerated unreadable session lines instead of refusing to purge: they are removed with the earlier history or kept verbatim after the compaction, and are now always reported in the confirmation dialog and in the final report.
+
 ## [0.1.0] - 2026-09-19
 
 - Added the `/purge` command: it rewrites the current session file on disk, deleting everything appended before the last compaction while keeping the original session header, the compaction checkpoint, the retained tail and everything appended afterwards.
@@ -12,4 +14,3 @@ Release notes are maintained in English. When a release is prepared, the `Unrele
 - Added a transactional rewrite with a backup next to the session file, an atomic temp-file replacement, a post-write verification and automatic restore on failure.
 - Added a final report with the bytes and percentage saved, plus a reminder to restart pi because the file was rewritten while pi had it loaded.
 - Added the deterministic release tooling (prepare, commit, publish, tag, GitHub release) adapted from `pi-webview`.
-

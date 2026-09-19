@@ -89,11 +89,33 @@ Dettagli e motivazioni:
 | Condizione                               | Motivo                    | Messaggio                               |
 | ---------------------------------------- | ------------------------- | --------------------------------------- |
 | file non di sessione                     | `not-a-session`           | il file non è una sessione pi           |
-| righe non parsabili / header duplicato   | `unsupported-format`      | purge annullato per non perdere dati    |
 | `getLeafId()` nullo                      | `no-active-path`          | nessuna posizione attiva                |
 | nessuna compaction nel file              | `no-compaction`           | solo sessioni con almeno una compaction |
 | compaction esistente ma su un altro ramo | `no-compaction-on-branch` | il ramo corrente non è compattato       |
 | nulla da rimuovere                       | `nothing-to-remove`       | il file parte già dalla compaction      |
+
+### Righe illeggibili
+
+Un file di sessione può contenere righe corrotte (scritture interrotte, NUL byte,
+JSON troncato). pi le salta al caricamento (`parseSessionEntries`), quindi il loro
+contenuto non è recuperabile e non entra in nessun contesto: il purge non si
+rifiuta più per questo.
+
+- le righe illeggibili **precedenti** la compaction vengono eliminate insieme
+  alla storia;
+- quelle **successive** vengono conservate byte per byte;
+- in entrambi i casi il numero è riportato nella conferma e nel **report finale**
+  (`Unreadable lines: N (X removed, Y kept verbatim)`);
+- la verifica post-scrittura tollera queste righe ma controlla il numero totale
+  di righe, per accorgersi di un troncamento.
+
+Caso reale che ha motivato la correzione: sessione da 114 MB con una riga da 3547
+caratteri di controllo e NUL byte in testa. L'entry distrutta ha lasciato un
+`parentId` pendente nell'entry successiva, quindi il cammino attivo dal leaf si
+ferma lì e la storia precedente era già irraggiungibile per pi. La prova
+read-only su quel file: 34994 entry su 35234 rimosse, 114 MB → 1,8 MB (98,4% in
+meno), con `buildSessionContext` di pi che ricostruisce gli stessi 230 messaggi e
+modello/thinking level invariati.
 
 ## Transazione
 

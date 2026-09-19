@@ -69,7 +69,17 @@ const refusalOf = (text: string, leafId: string | null) => {
 };
 
 const idsOfLines = (lines: readonly string[]): string[] =>
-  lines.slice(1).map((line) => (JSON.parse(line) as { id: string }).id);
+  lines
+    .slice(1)
+    .map((line) => {
+      // Unreadable lines are kept verbatim and carry no id.
+      try {
+        return (JSON.parse(line) as { id?: unknown }).id;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((id): id is string => typeof id === "string");
 
 const parentsOfLines = (lines: readonly string[]): [string, string | null][] =>
   lines.slice(1).map((line) => {
@@ -151,19 +161,61 @@ test("parseSessionJsonl keeps the header verbatim and skips empty lines", () => 
   const parsed = parseSessionJsonl(`\n${HEADER}\n\n${messageLine("u1", null, "user")}\n`);
   assert.equal(parsed.headerRaw, HEADER);
   assert.equal(parsed.records.length, 1);
-  assert.equal(parsed.invalidLines, 0);
+  assert.deepEqual(parsed.junk, []);
 });
 
-test("parseSessionJsonl counts invalid and duplicated header lines", () => {
+test("parseSessionJsonl collects corrupt, id-less and duplicated header lines as junk", () => {
   const parsed = parseSessionJsonl(`${HEADER}\nnot json\n${HEADER}\n{"type":"label"}\n`);
-  assert.equal(parsed.invalidLines, 3);
+  assert.deepEqual(
+    parsed.junk.map((line) => line.lineIndex),
+    [1, 2, 3],
+  );
   assert.equal(parsed.records.length, 0);
 });
 
-test("refuses a file that is not a session or has unparsable lines", () => {
+test("a corrupt line before the compaction is removed with the history", () => {
+  const corrupt = `${"\u0000".repeat(32)}{\"type\":\"message\",\"id\":\"m2\"}`;
+  const text = `${HEADER}\n${messageLine("m1", null, "user")}\n${corrupt}\n${messageLine(
+    "m3",
+    "m1",
+    "assistant",
+  )}\n${compactionLine("cmp", "m3", { firstKeptEntryId: "m3" })}\n${messageLine(
+    "m4",
+    "cmp",
+    "user",
+  )}\n`;
+
+  const plan = planOf(text, "m4");
+  assert.deepEqual(idsOfLines(plan.lines), ["m3", "cmp", "m4"]);
+  assert.equal(plan.junkRemoved, 1);
+  assert.equal(plan.junkKept, 0);
+  assert.equal(plan.removedRecords, 1);
+});
+
+test("a corrupt line after the compaction is kept verbatim", () => {
+  const corrupt = `${JSON.stringify({ type: "message", id: "x1" })}\u0000\u0000`;
+  const text = `${HEADER}\n${messageLine("m1", null, "user")}\n${messageLine(
+    "m2",
+    "m1",
+    "assistant",
+  )}\n${compactionLine("cmp", "m2", { firstKeptEntryId: "m2" })}\n${corrupt}\n${messageLine(
+    "m3",
+    "cmp",
+    "user",
+  )}\n`;
+
+  const plan = planOf(text, "m3");
+  assert.deepEqual(idsOfLines(plan.lines), ["m2", "cmp", "m3"]);
+  assert.equal(plan.lines.includes(corrupt), true);
+  assert.equal(plan.junkRemoved, 0);
+  assert.equal(plan.junkKept, 1);
+  assert.equal(plan.removedRecords, 1);
+  assert.equal(plan.totalBytes, Buffer.byteLength(text, "utf8"));
+  assert.equal(plan.keptBytes, Buffer.byteLength(renderSessionFile(plan.lines), "utf8"));
+});
+
+test("refuses a file that is not a session", () => {
   assert.equal(refusalOf(`${JSON.stringify({ nope: true })}\n`, null), "not-a-session");
-  const text = `${sessionFile(messageLine("u1", null, "user"))}garbage\n`;
-  assert.equal(refusalOf(text, "u1"), "unsupported-format");
 });
 
 test("refuses a session that never compacted", () => {

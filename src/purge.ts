@@ -16,9 +16,14 @@ export interface SessionEntry extends JsonRecord {
   parentId: string | null;
 }
 
-export interface SessionRecord {
-  /** The original JSONL line, verbatim, without its trailing newline. */
+export interface ParsedLine {
+  /** 0-based position in the file. */
+  lineIndex: number;
+  /** The line, verbatim, without its trailing carriage return. */
   raw: string;
+}
+
+export interface SessionRecord extends ParsedLine {
   /** Parsed entry, normalized so `parentId` is always present. */
   entry: SessionEntry;
 }
@@ -28,13 +33,16 @@ export interface ParsedSession {
   headerRaw: string | null;
   /** Non-header entries in file order. */
   records: SessionRecord[];
-  /** Non-empty lines that are not valid entries (or are extra headers). */
-  invalidLines: number;
+  /**
+   * Non-empty lines that are not usable entries: corrupt or truncated lines,
+   * objects without an id and extra header lines. pi skips them when loading a
+   * session, so they carry no recoverable context.
+   */
+  junk: ParsedLine[];
 }
 
 export type PurgeRefusal =
   | "not-a-session"
-  | "unsupported-format"
   | "no-active-path"
   | "no-compaction"
   | "no-compaction-on-branch"
@@ -53,6 +61,10 @@ export interface PurgePlan {
   keptIds: string[];
   removedRecords: number;
   keptRecords: number;
+  /** Unreadable lines dropped with the history before the compaction. */
+  junkRemoved: number;
+  /** Unreadable lines kept verbatim because they follow the compaction. */
+  junkKept: number;
   totalBytes: number;
   keptBytes: number;
   removedBytes: number;
@@ -91,40 +103,44 @@ const isEntry = (value: unknown): value is SessionEntry => {
   );
 };
 
-/** Parse a session JSONL file into its header line and entries, in file order. */
+/** Parse a session JSONL file into its header line, entries and junk lines. */
 export function parseSessionJsonl(text: string): ParsedSession {
   let headerRaw: string | null = null;
   const records: SessionRecord[] = [];
-  let invalidLines = 0;
+  const junk: ParsedLine[] = [];
 
-  for (const line of text.split("\n")) {
+  text.split("\n").forEach((line, lineIndex) => {
     const raw = line.endsWith("\r") ? line.slice(0, -1) : line;
-    if (raw.trim() === "") continue;
+    if (raw.trim() === "") return;
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      invalidLines += 1;
-      continue;
+      junk.push({ lineIndex, raw });
+      return;
     }
 
     const record = asRecord(parsed);
     if (record?.type === "session") {
-      // The first header wins; a second one makes the file ambiguous.
+      // The first header wins; a second one is not a usable entry.
       if (headerRaw === null) headerRaw = raw;
-      else invalidLines += 1;
-      continue;
+      else junk.push({ lineIndex, raw });
+      return;
     }
 
     if (!isEntry(parsed)) {
-      invalidLines += 1;
-      continue;
+      junk.push({ lineIndex, raw });
+      return;
     }
-    records.push({ raw, entry: { ...parsed, parentId: parsed.parentId ?? null } });
-  }
+    records.push({
+      lineIndex,
+      raw,
+      entry: { ...parsed, parentId: parsed.parentId ?? null },
+    });
+  });
 
-  return { headerRaw, records, invalidLines };
+  return { headerRaw, records, junk };
 }
 
 const byteLength = (value: string): number => new TextEncoder().encode(value).length;
@@ -172,7 +188,6 @@ export function activePath(
 export function planPurge(text: string, leafId: string | null): PurgePlanResult {
   const parsed = parseSessionJsonl(text);
   if (parsed.headerRaw === null) return { ok: false, reason: "not-a-session" };
-  if (parsed.invalidLines > 0) return { ok: false, reason: "unsupported-format" };
   if (leafId === null || parsed.records.length === 0) {
     return { ok: false, reason: "no-active-path" };
   }
@@ -196,18 +211,12 @@ export function planPurge(text: string, leafId: string | null): PurgePlanResult 
 
   const compactionRecord = path[compactionIndex] as SessionRecord;
   const beforeCompaction = path.slice(0, compactionIndex);
-  const fileIndex = new Map(
-    parsed.records.map((record, index) => [record.entry.id, index]),
-  );
-  const compactionFileIndex = fileIndex.get(compactionRecord.entry.id) ?? 0;
   const warnings: string[] = [];
   const kept = new Map<string, SessionRecord>();
 
   // 1) Everything appended after the compaction stays, abandoned branches included.
   for (const record of parsed.records) {
-    if ((fileIndex.get(record.entry.id) ?? 0) > compactionFileIndex) {
-      kept.set(record.entry.id, record);
-    }
+    if (record.lineIndex > compactionRecord.lineIndex) kept.set(record.entry.id, record);
   }
 
   // 2) A compaction rebuilds its retained tail from `firstKeptEntryId`, which
@@ -249,11 +258,18 @@ export function planPurge(text: string, leafId: string | null): PurgePlanResult 
   kept.set(compactionRecord.entry.id, compactionRecord);
 
   const keptRecords = [...kept.values()].sort(
-    (left, right) =>
-      (fileIndex.get(left.entry.id) ?? 0) - (fileIndex.get(right.entry.id) ?? 0),
+    (left, right) => left.lineIndex - right.lineIndex,
   );
+  // Unreadable lines cannot be interpreted, so they are never rewritten: the
+  // ones that precede the compaction go away with the history, the ones that
+  // follow it are kept verbatim.
+  const junkKept = parsed.junk.filter(
+    (line) => line.lineIndex > compactionRecord.lineIndex,
+  );
+  const junkRemoved = parsed.junk.length - junkKept.length;
   const removedRecords = parsed.records.length - keptRecords.length;
-  if (removedRecords <= 0) return { ok: false, reason: "nothing-to-remove" };
+  if (removedRecords + junkRemoved <= 0)
+    return { ok: false, reason: "nothing-to-remove" };
 
   // The spine (state entries, retained range, compaction) is rechained in file
   // order so the compaction stays reachable from the leaf. Everything else keeps
@@ -262,7 +278,7 @@ export function planPurge(text: string, leafId: string | null): PurgePlanResult 
     [...carried, ...retainedRange, compactionRecord].map((record) => record.entry.id),
   );
   const keptIds = new Set(keptRecords.map((record) => record.entry.id));
-  const lines = [parsed.headerRaw];
+  const output: ParsedLine[] = [];
   let previousSpineId: string | null = null;
   for (const record of keptRecords) {
     const { entry } = record;
@@ -274,12 +290,21 @@ export function planPurge(text: string, leafId: string | null): PurgePlanResult 
       parentId =
         entry.parentId !== null && keptIds.has(entry.parentId) ? entry.parentId : null;
     }
-    lines.push(
-      parentId === entry.parentId ? record.raw : JSON.stringify({ ...entry, parentId }),
-    );
+    output.push({
+      lineIndex: record.lineIndex,
+      raw:
+        parentId === entry.parentId ? record.raw : JSON.stringify({ ...entry, parentId }),
+    });
   }
+  output.push(...junkKept);
+  output.sort((left, right) => left.lineIndex - right.lineIndex);
+  const lines = [parsed.headerRaw, ...output.map((line) => line.raw)];
 
-  const totalBytes = byteLength(parsed.headerRaw) + 1 + sumBytes(parsed.records);
+  const totalBytes =
+    byteLength(parsed.headerRaw) +
+    1 +
+    sumBytes(parsed.records) +
+    parsed.junk.reduce((total, line) => total + byteLength(line.raw) + 1, 0);
   const keptBytes = lines.reduce((total, line) => total + byteLength(line) + 1, 0);
   return {
     ok: true,
@@ -291,6 +316,8 @@ export function planPurge(text: string, leafId: string | null): PurgePlanResult 
       keptIds: keptRecords.map((record) => record.entry.id),
       removedRecords,
       keptRecords: keptRecords.length,
+      junkRemoved,
+      junkKept: junkKept.length,
       totalBytes,
       keptBytes,
       removedBytes: Math.max(0, totalBytes - keptBytes),

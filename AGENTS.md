@@ -25,7 +25,7 @@ compattate.
 - `pi -e .` — prova l'estensione senza installarla
 - `pnpm release -- --version X.Y.Z` — prepara: bump in `package.json`, sposta le
   note da `[Unreleased]` a `[X.Y.Z]`, typecheck + test, tarball hashato,
-  manifest in `.release/`. **Non pubblica mai.**
+  manifest in `dist/`. **Non pubblica mai.**
 - `pnpm release -- --publish [--tag <dist-tag>]` — dopo il commit: richiede
   worktree pulito, pubblica il tarball verificato, verifica l'integrità sul
   registry, crea/verifica tag `vX.Y.Z` e GitHub release
@@ -45,6 +45,9 @@ compattate.
 - `docs/plans/0001-purge-comando-sessione.md` — decisioni di progetto
 - `tools/` — `release.mjs`, `npm-publish.mjs`, `changelog.mjs`,
   `check-package-manager.mjs`
+- `dist/` — artefatti di release (tarball npm + `release-manifest.json`),
+  gitignorata; l'estensione pubblicata spedisce solo `index.ts`, `src/`,
+  `README.md`, `CHANGELOG.md`, `LICENSE`
 
 ## Convenzioni
 

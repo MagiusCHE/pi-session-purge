@@ -40,7 +40,8 @@ import { releaseChangelog, releaseNotesForVersion } from "./changelog.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packageJsonPath = join(root, "package.json");
 const changelogPath = join(root, "CHANGELOG.md");
-const manifestPath = join(root, ".release", "release-manifest.json");
+const distDir = join(root, "dist");
+const manifestPath = join(distDir, "release-manifest.json");
 
 // Everything shipped to npm plus the manifest source, hashed so --publish-only
 // can prove it publishes the artifacts that were actually built and committed.
@@ -183,7 +184,7 @@ const tarballDetails = (filename) => {
   ) {
     fail("release tarball filename is invalid");
   }
-  const path = join(root, filename);
+  const path = join(distDir, filename);
   if (!existsSync(path)) fail("release tarball is missing");
   const contents = readFileSync(path);
   return {
@@ -318,7 +319,12 @@ const createReleaseTarball = (releasePackage) => {
   console.log(
     `\n→ create verified tarball ${releasePackage.name}@${releasePackage.version}…`,
   );
-  const packed = runNpm(["pack", "--json", "--registry", NPMJS_REGISTRY], { cwd: root });
+  // npm pack requires the destination to exist and does not create it.
+  mkdirSync(distDir, { recursive: true });
+  const packed = runNpm(
+    ["pack", "--json", "--registry", NPMJS_REGISTRY, "--pack-destination", distDir],
+    { cwd: root },
+  );
   if (packed.status !== 0) fail("unable to create the verified npm release tarball");
   return tarballDetails(parseNpmPackOutput(packed.stdout));
 };
@@ -395,8 +401,8 @@ const releaseNotes = (releasePackage) =>
   `@magiusche/pi-session-purge ${releasePackage.version}\n\nInstall: \`pi install npm:@magiusche/pi-session-purge\`\nUpdate: \`pi update --extensions\`\n\nUsage: run \`/purge\` inside a session that has been compacted at least once.\n\nhttps://www.npmjs.com/package/@magiusche/pi-session-purge\n`;
 
 const ensureGitHubRelease = (releaseName, releasePackage, tarball) => {
-  mkdirSync(dirname(manifestPath), { recursive: true });
-  const notesPath = join(root, ".release", `release-notes-${releasePackage.version}.md`);
+  mkdirSync(distDir, { recursive: true });
+  const notesPath = join(distDir, `release-notes-${releasePackage.version}.md`);
   writeFileSync(notesPath, releaseNotes(releasePackage));
 
   try {

@@ -13,7 +13,9 @@ compattate.
 - TypeScript caricato direttamente da pi (nessun bundler, nessuna dipendenza
   runtime)
 - Test: `node --test` con TypeScript nativo
-- Package manager: **pnpm** (bloccato da `preinstall` → `tools/check-package-manager.mjs`)
+- Package manager: **pnpm** — il blocco è nel campo `scripts.preinstall` di
+  `package.json` (in linea, così non dipende da file non pubblicati: nel repo
+  blocca npm, nel pacchetto installato è un no-op) più `devEngines`
 - Tooling di release ripreso da `pi-webview` e ridotto al minimo
 
 ## Comandi

@@ -35,7 +35,7 @@
     ]
   },
   "scripts": {
-    "preinstall": "node tools/check-package-manager.mjs",
+    "preinstall": "node -e \"const{existsSync}=require('node:fs');if(existsSync('tools/check-package-manager.mjs')){const{spawnSync}=require('node:child_process');process.exit(spawnSync(process.execPath,['tools/check-package-manager.mjs'],{stdio:'inherit'}).status??1)}\"",
     "test": "node --test \"tests/**/*.test.ts\"",
     "test:watch": "node --test --watch \"tests/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",

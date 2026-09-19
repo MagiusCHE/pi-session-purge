@@ -4,6 +4,8 @@ Release notes are maintained in English. When a release is prepared, the `Unrele
 
 ## [Unreleased]
 
+- Fixed the install guard: the declared `preinstall` script pointed at a development file that the published package does not ship, so any installer running install scripts aborted with `MODULE_NOT_FOUND`. The guard now runs only inside the repository and is a no-op for installed packages, while still blocking npm in the project.
+
 ## [1.0.0] - 2026-09-19
 
 - First stable release: `/purge` rewrites the session file on disk, deleting everything appended before the last compaction while keeping the original header, the compaction checkpoint, the tail it retains and everything appended after it.

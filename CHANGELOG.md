@@ -4,6 +4,8 @@ Release notes are maintained in English. When a release is prepared, the `Unrele
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-19
+
 - Fixed the install guard: the declared `preinstall` script pointed at a development file that the published package does not ship, so any installer running install scripts aborted with `MODULE_NOT_FOUND`. The guard now runs only inside the repository and is a no-op for installed packages, while still blocking npm in the project.
 
 ## [1.0.0] - 2026-09-19

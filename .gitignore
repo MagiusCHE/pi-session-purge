@@ -1,0 +1,32 @@
+# Local pi state (sessions, todos, settings of this directory)
+.pi/
+
+# pnpm
+node_modules/
+
+# Release manifest and npm pack output (release.mjs reuses the verified tarball)
+.release/
+*.tgz
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.local.*
+local_*
+private_*
+credentials*.json
+service-account*.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
